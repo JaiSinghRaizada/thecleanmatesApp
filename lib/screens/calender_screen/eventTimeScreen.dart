@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class EventTimeScreen extends StatelessWidget {
   final DateTime date;
@@ -8,6 +9,41 @@ class EventTimeScreen extends StatelessWidget {
 
   const EventTimeScreen({Key? key, required this.date, required this.events})
       : super(key: key);
+
+  Future<void> _launchMap(BuildContext context, String address) async {
+    final encodedAddress = Uri.encodeComponent(address);
+    final browserUrl = Uri.parse(
+        'https://www.google.com/maps/search/?api=1&query=$encodedAddress');
+    if (!await launchUrl(browserUrl)) {
+      throw Exception('Could not launch');
+    }
+  }
+
+  Future<Map<String, dynamic>?> fetchAddress(
+      String phoneNumber, int addressIndex) async {
+    try {
+      DocumentSnapshot documentSnapshot = await FirebaseFirestore.instance
+          .collection('addresses')
+          .doc(phoneNumber)
+          .get();
+
+      if (documentSnapshot.exists) {
+        List<dynamic> addresses = documentSnapshot['address'];
+        if (addressIndex < addresses.length) {
+          return addresses[addressIndex];
+        } else {
+          print('Invalid address index');
+          return null;
+        }
+      } else {
+        print('Document not found');
+        return null;
+      }
+    } catch (e) {
+      print('Error fetching address: $e');
+      return null;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -68,9 +104,9 @@ class EventTimeScreen extends StatelessWidget {
                     const SizedBox(height: 6),
                     Divider(color: Colors.grey.shade300),
                     const SizedBox(height: 6),
-                    Text(
+                    const Text(
                       "Events:",
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                         color: Colors.redAccent,
@@ -102,42 +138,59 @@ class EventTimeScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    Text(
+                    const Text(
                       "Address:",
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                         color: Colors.redAccent,
                       ),
                     ),
                     const SizedBox(height: 6),
-                    ...eventsByTime[time]!.map(
-                          (event) {
-                        final address = event['address'] as Map<String, dynamic>;
-                        final String formattedAddress =
-                            "${address['hno']}, ${address['area']}, ${address['city']}, ${address['postal_code']}";
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
+                    FutureBuilder<Map<String, dynamic>?>(
+                      future: fetchAddress(
+                          eventsByTime[time]!.first['phone_number'],
+                          eventsByTime[time]!.first['addressIndex']),
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        } else if (snapshot.hasData && snapshot.data != null) {
+                          final address = snapshot.data!;
+                          final String formattedAddress =
+                          "${address['hno'] ?? ''}, ${address['area'] ?? ''}, ${address['city'] ?? ''}, ${address['postal_code'] ?? ''}"
+                              .trim()
+                              .replaceAll(RegExp(r' ,|, ,'), ',');
+                          return Row(
                             children: [
-                              const Icon(
-                                Icons.home,
-                                color: Colors.blueGrey,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 8),
+
                               Expanded(
                                 child: Text(
-                                  formattedAddress,
+                                  formattedAddress.isNotEmpty
+                                      ? formattedAddress
+                                      : 'Address not available',
                                   style: const TextStyle(
                                     fontSize: 15,
                                     color: Colors.black87,
                                   ),
                                 ),
                               ),
+                              InkWell(
+                                onTap: () =>
+                                    _launchMap(context, formattedAddress),
+                                child: const Icon(
+                                  Icons.directions,
+                                  color: Colors.blueGrey,
+                                  size: 30,
+                                ),
+                              ),
                             ],
-                          ),
-                        );
+                          );
+                        } else {
+                          return const Text('Address not available');
+                        }
                       },
                     ),
                   ],

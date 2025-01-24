@@ -12,19 +12,18 @@ class _AddEventsState extends State<AddEvents> {
   // Variables to store selected date and time
   ValueNotifier<DateTime?> selectedDate = ValueNotifier<DateTime?>(null);
   ValueNotifier<TimeOfDay?> selectedTime = ValueNotifier<TimeOfDay?>(null);
-
+  ValueNotifier<TimeOfDay?> selectedEndTime = ValueNotifier<TimeOfDay?>(null);
+  bool isInputVisible = false; // Toggle state
+  final TextEditingController hourController = TextEditingController();
   // Text editing controllers for the input fields
   TextEditingController phoneController = TextEditingController();
-  TextEditingController areaController = TextEditingController();
-  TextEditingController hnoController = TextEditingController();
-  TextEditingController postalCodeController = TextEditingController();
-  TextEditingController cityController = TextEditingController();
   TextEditingController nameController = TextEditingController();
 
   TextEditingController NewAreaController = TextEditingController();
   TextEditingController NewHnoController = TextEditingController();
   TextEditingController NewPostalCodeController = TextEditingController();
   TextEditingController NewCityController = TextEditingController();
+  int selectedCardIndex = -1;
 
   // Firebase Firestore instance
   FirebaseFirestore firestore = FirebaseFirestore.instance;
@@ -36,17 +35,30 @@ class _AddEventsState extends State<AddEvents> {
   Future<void> fetchAddress(String phoneNo) async {
     try {
       // Fetch existing addresses for the provided phone number
-      QuerySnapshot snapshot = await firestore
+      DocumentSnapshot snapshot = await firestore
           .collection('addresses')
-          .where('phone_number', isEqualTo: phoneNo)
+          .doc(phoneNo)
           .get();
 
-      if (snapshot.docs.isNotEmpty) {
+      if (snapshot.exists) {
+        Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>? ?? {};
+        print('Fetched data: $data');
+        // Retrieve the 'address' field safely
+        List<dynamic> addresses = data['address'] ?? [];
+
+        // Loop through and process each address
+        List<Map<String, dynamic>> validAddresses = [];
+        for (var address in addresses) {
+          if (address != null && address is Map<String, dynamic>) {
+
+            validAddresses.add(Map<String, dynamic>.from(address));
+          }
+        }
+
         setState(() {
-          existingAddresses = snapshot.docs
-              .map((doc) => doc.data() as Map<String, dynamic>)
-              .toList();
+          existingAddresses = validAddresses; // Store all valid addresses in the state
         });
+        print(existingAddresses);
       } else {
         setState(() {
           existingAddresses = [];
@@ -57,15 +69,28 @@ class _AddEventsState extends State<AddEvents> {
     }
   }
 
-  // Function to populate the address fields with an existing address
-  void populateAddress(Map<String, dynamic> address) {
-    setState(() {
-      areaController.text = address['address']['area'] ?? '';
-      hnoController.text = address['address']['hno'] ?? '';
-      postalCodeController.text = address['address']['postal_code'] ?? '';
-      cityController.text = address['address']['city'] ?? '';
-    });
+  Future<void> fetchName(String phoneNo) async {
+    try {
+      QuerySnapshot snapshot = await firestore
+          .collection('clients')
+          .where('phone_number', isEqualTo: phoneNo)
+          .get();
+
+      if (snapshot.docs.isNotEmpty) {
+        setState(() {
+          nameController.text = snapshot.docs.first['name'] ?? 'Unknown';
+        });
+      } else {
+        setState(() {
+          nameController.text = '';
+        });
+      }
+    } catch (e) {
+      print('Error fetching name: $e');
+    }
   }
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -89,24 +114,9 @@ class _AddEventsState extends State<AddEvents> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Add Name',
+                  'Phone No',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 5),
-                TextField(
-                  controller: nameController,
-                  decoration: InputDecoration(
-                    hintText: 'Enter your Name',
-                    suffixIcon: Icon(Icons.phone, color: Colors.white),
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                const Text(
-                  'Add Phone No',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 5),
                 TextField(
                   controller: phoneController,
                   keyboardType: TextInputType.number,
@@ -120,14 +130,31 @@ class _AddEventsState extends State<AddEvents> {
                     if (value.length == 10) {
                       // When the phone number is entered, fetch address data
                       fetchAddress(value);
+                      fetchName(value);
                     } else {
                       setState(() {
                         existingAddresses =
-                            []; // Clear suggestions if phone is incomplete
+                        [];
+                        selectedCardIndex = -1;
                       });
                     }
                   },
                 ),
+
+                const Text(
+                  'Name',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 5),
+                TextField(
+                  controller: nameController,
+                  decoration: InputDecoration(
+                    hintText: 'Enter your Name',
+                    suffixIcon: Icon(Icons.phone, color: Colors.white),
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 5),
                 ElevatedButton(
                   style: ButtonStyle(
                     foregroundColor:
@@ -251,6 +278,7 @@ class _AddEventsState extends State<AddEvents> {
                                     DocumentReference clientRef = firestore
                                         .collection('clients')
                                         .doc(phoneNo);
+
                                     DocumentSnapshot clientSnapshot =
                                         await clientRef.get();
 
@@ -261,57 +289,71 @@ class _AddEventsState extends State<AddEvents> {
                                       });
                                     }
 
-                                    // Check if the same address already exists
-                                    QuerySnapshot existingAddress =
-                                        await firestore
-                                            .collection('addresses')
-                                            .where('phone_number',
-                                                isEqualTo: phoneNo)
-                                            .where('address.area',
-                                                isEqualTo:
-                                                    NewAreaController.text)
-                                            .where('address.hno',
-                                                isEqualTo:
-                                                    NewHnoController.text)
-                                            .where('address.postal_code',
-                                                isEqualTo:
-                                                    NewPostalCodeController
-                                                        .text)
-                                            .where('address.city',
-                                                isEqualTo:
-                                                    NewCityController.text)
-                                            .get();
+                                    DocumentReference addressRef = firestore
+                                        .collection('addresses')
+                                        .doc(phoneNo);
 
-                                    if (existingAddress.docs.isEmpty) {
-                                      await firestore
-                                          .collection('addresses')
-                                          .add({
-                                        'phone_number': phoneNo,
-                                        'address': {
-                                          'area': NewAreaController.text,
-                                          'hno': NewHnoController.text,
-                                          'postal_code':
-                                              NewPostalCodeController.text,
-                                          'city': NewCityController.text,
-                                        },
+                                    DocumentSnapshot addressSnapshot =
+                                    await addressRef.get();
+
+                                    if (!addressSnapshot.exists) {
+                                      await addressRef.set({
+                                        'address': []
                                       });
+                                    }
 
-                                      ScaffoldMessenger.of(context)
+                                    Map<String, String> newAddress = {
+                                      'area': NewAreaController.text,
+                                      'hno': NewHnoController.text,
+                                      'postal_code': NewPostalCodeController.text,
+                                      'city': NewCityController.text,
+                                    };
+
+                                    FirebaseFirestore.instance
+                                        .collection('addresses')
+                                        .doc(phoneNo)
+                                        .set({
+                                      "address": FieldValue.arrayUnion([newAddress])
+                                    }, SetOptions(merge: true))
+                                        .then((value) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Address Added Successfully')),
+                                      );
+                                    })
+                                        .catchError((error) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Failed to add address: $error')),
+                                      );
+                                    });
+
+
+                                    // await firestore.collection('addresses').doc(phoneNo).add({
+                                    //   'address': {
+                                    //     'area': NewAreaController.text,
+                                    //     'hno': NewHnoController.text,
+                                    //     'postal_code': NewPostalCodeController.text,
+                                    //     'city': NewCityController.text,
+                                    //   },
+                                    // });
+
+
+                                    ScaffoldMessenger.of(context)
                                           .showSnackBar(
                                         const SnackBar(
                                           content: Text(
                                               'Address Added Successfully'),
                                         ),
                                       );
-                                    } else {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        const SnackBar(
-                                          content:
-                                              Text('Address Already Exists'),
-                                        ),
-                                      );
-                                    }
+
+                                    // } else {
+                                    //   ScaffoldMessenger.of(context)
+                                    //       .showSnackBar(
+                                    //     const SnackBar(
+                                    //       content:
+                                    //           Text('Address Already Exists'),
+                                    //     ),
+                                    //   );
+                                    // }
 
                                     NewAreaController.clear();
                                     NewHnoController.clear();
@@ -359,17 +401,20 @@ class _AddEventsState extends State<AddEvents> {
                     itemCount: existingAddresses.length,
                     itemBuilder: (context, index) {
                       final address = existingAddresses[index];
+                      final isSelected = index == selectedCardIndex;
+
                       return GestureDetector(
                         onTap: () {
-                          populateAddress(
-                              address); // Populate the address fields
+                          setState(() {
+                            selectedCardIndex = index; // Update the selected card index
+                          });
                         },
                         child: Card(
+                          color: isSelected ? Colors.lightBlue[100] : Colors.white,
                           child: ListTile(
-                            title:
-                                Text(address['address']['area'] ?? 'No area'),
+                            title: Text(address['area'] ?? 'No area'),
                             subtitle: Text(
-                                '${address['address']['city'] ?? 'No city'}, ${address['address']['postal_code'] ?? 'No postal code'}'),
+                                '${address['city'] ?? 'No city'}, ${address['postal_code'] ?? 'No postal code'}'),
                           ),
                         ),
                       );
@@ -378,50 +423,6 @@ class _AddEventsState extends State<AddEvents> {
                   const SizedBox(height: 20),
                 ],
 
-                // Add Address Section
-                const Text(
-                  'Add Address',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: areaController,
-                  decoration: InputDecoration(
-                    border: OutlineInputBorder(),
-                    hintText: 'Enter your Area',
-                  ),
-                  enabled: false,
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: hnoController,
-                  decoration: InputDecoration(
-                    border: OutlineInputBorder(),
-                    hintText: 'Enter your Hno',
-                  ),
-                  enabled: false,
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: postalCodeController,
-                  decoration: InputDecoration(
-                    border: OutlineInputBorder(),
-                    hintText: 'Enter your Postal code',
-                  ),
-                  enabled: false,
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: cityController,
-                  decoration: InputDecoration(
-                    border: OutlineInputBorder(),
-                    hintText: 'Enter your City',
-                  ),
-                  enabled: false,
-                ),
-                const SizedBox(height: 30),
-
-                // Select Date Section
                 const Text(
                   'Select Date',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -474,7 +475,6 @@ class _AddEventsState extends State<AddEvents> {
                   },
                 ),
                 const SizedBox(height: 30),
-
                 // Select Time Section
                 const Text(
                   'Select Time',
@@ -524,7 +524,48 @@ class _AddEventsState extends State<AddEvents> {
                     );
                   },
                 ),
-                const SizedBox(height: 80),
+                const SizedBox(height: 30),
+                const Text(
+                  'Select End Time (By default 2 hours)',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    const Text('Edit End Time:'),
+                    Switch(
+                      value: isInputVisible,
+                      onChanged: (value) {
+                        setState(() {
+                          isInputVisible = value;
+                          if (!value) {
+                            hourController.text = '2';
+                          }
+                        });
+                      },
+                      activeColor: const Color(0xFFF23D49),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                if (isInputVisible)
+                  TextField(
+                    controller: hourController,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      hintText: 'Enter number of hours (default: 2)',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Color(0xFFF23D49)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Color(0xFFF23D49)),
+                      ),
+                    ),
+                  ),
+
+                const SizedBox(height: 130),
               ],
             ),
           ),
@@ -545,10 +586,7 @@ class _AddEventsState extends State<AddEvents> {
                           content: Text('Phone number is required'),
                         ),
                       );
-                    } else if (areaController.text.isEmpty ||
-                        hnoController.text.isEmpty ||
-                        postalCodeController.text.isEmpty ||
-                        cityController.text.isEmpty) {
+                    } else if (selectedCardIndex == -1) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text('Address is required'),
@@ -563,7 +601,7 @@ class _AddEventsState extends State<AddEvents> {
                     } else if (selectedTime.value == null) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('Time selection is required'),
+                          content: Text('Start Time selection is required'),
                         ),
                       );
                     } else if (nameController.text.isEmpty) {
@@ -581,6 +619,7 @@ class _AddEventsState extends State<AddEvents> {
                         selectedTime.value!.hour,
                         selectedTime.value!.minute,
                       );
+                      int timeInMinutes(TimeOfDay time) => time.hour * 60 + time.minute;
 
                       if (selectedDateTime.isBefore(now)) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -589,21 +628,19 @@ class _AddEventsState extends State<AddEvents> {
                                 'Selected date and time cannot be in the past'),
                           ),
                         );
-                      } else {
+                      }else {
                         try {
                           String phoneNo = phoneController.text;
                           String name = nameController.text;
 
                           // Check if the client exists
-                          DocumentReference clientRef =
-                              firestore.collection('clients').doc(phoneNo);
-                          DocumentSnapshot clientSnapshot =
-                              await clientRef.get();
+                          DocumentReference clientRef = firestore.collection('clients').doc(phoneNo);
+                          DocumentSnapshot clientSnapshot = await clientRef.get();
 
                           if (!clientSnapshot.exists) {
-                            await clientRef
-                                .set({'phone_number': phoneNo, 'name': name});
+                            await clientRef.set({'phone_number': phoneNo, 'name': name});
                           }
+
                           // Convert the selected date and time to Firestore timestamp
                           DateTime eventStartDateTime = DateTime(
                             selectedDate.value!.year,
@@ -612,23 +649,26 @@ class _AddEventsState extends State<AddEvents> {
                             selectedTime.value!.hour,
                             selectedTime.value!.minute,
                           );
-                          DateTime eventEndDateTime =
-                              eventStartDateTime.add(Duration(hours: 2));
+                          DateTime eventEndDateTime = eventStartDateTime.add(
+                            Duration(hours: int.tryParse(hourController.text) ?? 2),
+                          );
+                          if (hourController.text.isEmpty) {
+                            eventEndDateTime = eventStartDateTime.add(
+                              Duration(hours: 2),
+                            );
+                          }
 
                           // Fetch all events with the same date and time
                           QuerySnapshot overlappingEvents = await firestore
                               .collection('events')
-                              .where('event_start_date_time',
-                                  isLessThanOrEqualTo: eventEndDateTime)
-                              .where('event_end_date_time',
-                                  isGreaterThanOrEqualTo: eventStartDateTime)
+                              .where('event_start_date_time', isLessThanOrEqualTo: eventEndDateTime)
+                              .where('event_end_date_time', isGreaterThanOrEqualTo: eventStartDateTime)
                               .get();
 
                           //! Maximum Limit of add events at one time
                           const int maxEventsAtSameTime = 1;
 
-                          if (overlappingEvents.docs.length >=
-                              maxEventsAtSameTime) {
+                          if (overlappingEvents.docs.length >= maxEventsAtSameTime) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text(
@@ -644,27 +684,19 @@ class _AddEventsState extends State<AddEvents> {
                             'event_start_date_time': eventStartDateTime,
                             'event_end_date_time': eventEndDateTime,
                             'event_name': 'Event',
-                            'address': {
-                              'area': areaController.text,
-                              'hno': hnoController.text,
-                              'postal_code': postalCodeController.text,
-                              'city': cityController.text,
-                            },
+                            'addressIndex': selectedCardIndex
                           });
 
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Event Added Successfully'),
-                            ),
+                            const SnackBar(content: Text('Event Added Successfully')),
                           );
+
+                          // Clear the controllers and reset values
                           phoneController.clear();
-                          areaController.clear();
-                          hnoController.clear();
-                          postalCodeController.clear();
-                          cityController.clear();
                           nameController.clear();
                           selectedDate.value = null;
                           selectedTime.value = null;
+                          selectedCardIndex = -1;
 
                           showDialog<String>(
                             context: context,
@@ -688,7 +720,8 @@ class _AddEventsState extends State<AddEvents> {
                               ],
                             ),
                           );
-                        } catch (e) {
+                        }
+                        catch (e) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text('Failed to add event'),
